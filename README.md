@@ -1,4 +1,22 @@
-# Emotion Detection Web Application
+# Real-Time Emotion Detection
+
+A deep learning-based web application for real-time emotion detection using a trained DNN model. The application can detect 7 different emotions: angry, disgust, fear, happy, neutral, sad, and surprise.
+
+## Features
+
+- 📷 **Image Upload** - Upload images for emotion detection with face detection
+- 🎬 **Video Upload** - Upload videos for frame-by-frame emotion analysis
+- 📹 **Webcam** - Real-time emotion detection from webcam
+- 🎨 **Modern UI** - Beautiful gradient design with drag-and-drop support
+- 📊 **Confidence Scores** - Shows prediction confidence for all emotions
+
+## Live Demo
+
+Access the application at: **http://localhost:5000** (when running locally)
+
+## Repository
+
+GitHub: https://github.com/shahzaibhussain610-ui/Real-Time-Emotion-Detection
 
 ## Installation & Setup
 
