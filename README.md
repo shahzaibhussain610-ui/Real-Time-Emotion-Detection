@@ -20,7 +20,8 @@ GitHub: https://github.com/shahzaibhussain610-ui/Real-Time-Emotion-Detection
 
 ## Installation & Setup
 
-### Step 1: Install Visual C++ Redistributable
+### Option 1: Run with Flask (Original)
+#### Step 1: Install Visual C++ Redistributable
 The error you're seeing is due to missing Visual C++ Redistributable. Download and install it:
 
 **Download Link:** https://aka.ms/vs/17/release/vc_redist.x64.exe
@@ -41,10 +42,35 @@ pip install tensorflow-cpu==2.15.0
 
 ### Step 4: Run the Application
 ```bash
-python emotion_detection_app.py
+python emotion_detection_final.py
 ```
 
 Then open your browser and navigate to: http://localhost:5000
+
+---
+
+### Option 2: Run with Streamlit (Recommended for Deployment)
+#### Step 1: Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+#### Step 2: Run the Streamlit App
+```bash
+streamlit run streamlit_app.py
+```
+
+The app will automatically open in your browser at: http://localhost:8501
+
+#### Deploy to Streamlit Cloud
+1. Push your code to GitHub (already done!)
+2. Visit [share.streamlit.io](https://share.streamlit.io)
+3. Sign in with your GitHub account
+4. Select your repository: `shahzaibhussain610-ui/Real-Time-Emotion-Detection`
+5. Set the main file path: `streamlit_app.py`
+6. Click "Deploy"
+
+Your app will be live at: `https://[your-app-name].streamlit.app`
 
 ## Features
 - 📷 **Image Upload**: Upload images for emotion detection
