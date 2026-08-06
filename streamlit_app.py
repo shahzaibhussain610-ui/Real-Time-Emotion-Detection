@@ -11,8 +11,6 @@ import streamlit as st
 from PIL import Image
 import joblib
 import tempfile
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
-import av
 
 # Page configuration - MUST BE FIRST
 st.set_page_config(
@@ -151,35 +149,6 @@ def predict_emotion(processed_image):
         st.error(f"Prediction error: {str(e)}")
         return None, None
 
-# Video transformer for real-time webcam
-class EmotionDetector(VideoTransformerBase):
-    def __init__(self):
-        self.emotion_history = []
-    
-    def recv(self, frame):
-        # Convert frame to numpy array
-        img = frame.to_ndarray(format="bgr24")
-        
-        # Preprocess
-        processed_image, annotated_frame = preprocess_image(img)
-        
-        if processed_image is not None and st.session_state.model_loaded:
-            emotion, confidence = predict_emotion(processed_image)
-            
-            if emotion:
-                self.emotion_history.append(emotion)
-                if len(self.emotion_history) > 10:
-                    self.emotion_history.pop(0)
-                
-                dominant_emotion = max(set(self.emotion_history), key=self.emotion_history.count)
-                cv2.putText(annotated_frame, f"Emotion: {dominant_emotion}", 
-                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                cv2.putText(annotated_frame, f"Confidence: {confidence*100:.1f}%", 
-                           (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # Convert back to VideoFrame
-        return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
-
 def main():
     # Header
     st.markdown('<div class="main-header">🎭 Emotion Detection System</div>', unsafe_allow_html=True)
@@ -193,7 +162,7 @@ def main():
         This app uses a Deep Neural Network to detect emotions from:
         - 📷 Images
         - 🎬 Videos  
-        - 📹 Webcam (Live)
+        - 📹 Webcam Photo
         
         **Emotions detected:**
         - Angry
@@ -385,26 +354,43 @@ def main():
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
         
-        # Tab 3: Webcam - Live Streaming
+        # Tab 3: Webcam - Take Photo
         with tab3:
-            st.header("Live Webcam Emotion Detection")
-            st.info("📹 Real-time emotion detection from your webcam")
+            st.header("Webcam Emotion Detection")
+            st.info("📸 Take a photo with your webcam to detect emotions instantly")
             
-            # Configure WebRTC
-            rtc_config = RTCConfiguration(
-                {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-            )
+            # Use Streamlit's camera input (works on both local and cloud)
+            camera_photo = st.camera_input("Take a photo")
             
-            # Webcam streamer
-            webrtc_streamer(
-                key="emotion-detection",
-                video_processor_factory=EmotionDetector,
-                rtc_configuration=rtc_config,
-                media_stream_constraints={"video": True, "audio": False},
-                async_processing=True
-            )
-            
-            st.success("✅ Webcam is active! Emotions will be detected in real-time.")
+            if camera_photo is not None:
+                try:
+                    # Convert to OpenCV format
+                    image = np.array(Image.open(camera_photo))
+                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                    
+                    # Process and predict
+                    with st.spinner("Analyzing emotion..."):
+                        processed_image, annotated_image = preprocess_image(image)
+                        
+                        if processed_image is not None:
+                            emotion, confidence = predict_emotion(processed_image)
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.subheader("Captured Photo")
+                                st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), use_container_width=True)
+                            
+                            with col2:
+                                st.subheader("Result")
+                                if emotion:
+                                    st.image(cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB), use_container_width=True)
+                                    st.markdown(f'<div class="emotion-box">{emotion.upper()}</div>', unsafe_allow_html=True)
+                                    st.markdown(f"**Confidence:** {confidence*100:.1f}%")
+                                else:
+                                    st.error("❌ Could not detect emotion")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
     else:
         st.error("❌ Model not loaded. Please check the error messages above.")
         st.info("💡 Tip: Make sure the model files exist in the models/ directory")
