@@ -11,6 +11,8 @@ import streamlit as st
 from PIL import Image
 import joblib
 import tempfile
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
+import av
 
 # Page configuration - MUST BE FIRST
 st.set_page_config(
@@ -100,54 +102,69 @@ def load_model():
         st.error(f"Details: {traceback.format_exc()}")
         return None, None
 
-def preprocess_image(image):
-    """Preprocess image for model input"""
+def detect_emotions_in_frame(frame):
+    """Detect emotions in all faces in a frame"""
     try:
         # Convert to grayscale
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = image
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Try to detect face
-        try:
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        # Detect all faces
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        
+        results = []
+        
+        # Process each face
+        for (x, y, w, h) in faces:
+            # Extract face
+            face_roi = gray[y:y+h, x:x+w]
             
-            if len(faces) > 0:
-                faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
-                (x, y, w, h) = faces[0]
-                face_roi = gray[y:y+h, x:x+w]
-                cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            else:
-                face_roi = gray
-        except:
-            face_roi = gray
+            # Resize and normalize
+            face_roi_resized = cv2.resize(face_roi, (48, 48))
+            face_roi_normalized = face_roi_resized.astype('float32') / 255.0
+            face_roi_reshaped = face_roi_normalized.reshape(1, 48, 48, 1)
+            
+            # Predict emotion
+            if st.session_state.model is not None:
+                predictions = st.session_state.model.predict(face_roi_reshaped, verbose=0)
+                predicted_class = np.argmax(predictions[0])
+                confidence = float(predictions[0][predicted_class])
+                emotion = st.session_state.emotions[predicted_class]
+                
+                results.append({
+                    'box': (x, y, w, h),
+                    'emotion': emotion,
+                    'confidence': confidence
+                })
+                
+                # Draw rectangle and label
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                label = f"{emotion}: {confidence*100:.1f}%"
+                cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         
-        # Resize and normalize
-        face_roi = cv2.resize(face_roi, (48, 48))
-        face_roi = face_roi.astype('float32') / 255.0
-        face_roi = face_roi.reshape(1, 48, 48, 1)
-        
-        return face_roi, image
+        return frame, results
     except Exception as e:
-        st.error(f"Error preprocessing image: {str(e)}")
-        return None, None
+        return frame, []
 
-def predict_emotion(processed_image):
-    """Predict emotion from preprocessed image"""
-    if st.session_state.model is None:
-        return None, None
+# Video transformer for real-time webcam
+class EmotionDetector(VideoTransformerBase):
+    def __init__(self):
+        self.frame_count = 0
     
-    try:
-        predictions = st.session_state.model.predict(processed_image, verbose=0)
-        predicted_class = np.argmax(predictions[0])
-        confidence = float(predictions[0][predicted_class])
-        emotion = st.session_state.emotions[predicted_class]
-        return emotion, confidence
-    except Exception as e:
-        st.error(f"Prediction error: {str(e)}")
-        return None, None
+    def recv(self, frame):
+        # Convert frame to numpy array
+        img = frame.to_ndarray(format="bgr24")
+        
+        # Process every 3rd frame for performance
+        self.frame_count += 1
+        if self.frame_count % 3 == 0:
+            # Detect emotions in all faces
+            annotated_frame, emotions = detect_emotions_in_frame(img)
+        else:
+            annotated_frame = img
+        
+        # Convert back to VideoFrame
+        return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
 
 def main():
     # Header
@@ -162,7 +179,7 @@ def main():
         This app uses a Deep Neural Network to detect emotions from:
         - 📷 Images
         - 🎬 Videos  
-        - 📹 Webcam Photo
+        - 📹 Webcam (Live)
         
         **Emotions detected:**
         - Angry
@@ -172,6 +189,10 @@ def main():
         - Neutral
         - Sad
         - Surprise
+        
+        **Features:**
+        - Multiple face detection
+        - Real-time processing
         """)
         
         st.subheader("📊 Model Status")
@@ -198,7 +219,7 @@ def main():
         st.success("✅ Model is ready! Upload an image to start.")
         
         # Create tabs
-        tab1, tab2, tab3 = st.tabs(["📷 Image Upload", "🎬 Video Upload", "📹 Webcam"])
+        tab1, tab2, tab3 = st.tabs(["📷 Image Upload", "🎬 Video Upload", "📹 Live Webcam"])
         
         # Tab 1: Image Upload
         with tab1:
@@ -207,7 +228,7 @@ def main():
             uploaded_file = st.file_uploader(
                 "Choose an image...",
                 type=['png', 'jpg', 'jpeg', 'gif', 'bmp'],
-                help="Upload an image containing a face"
+                help="Upload an image containing faces"
             )
             
             if uploaded_file is not None:
@@ -225,41 +246,28 @@ def main():
                             st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), use_container_width=True)
                         
                         # Process and predict
-                        with st.spinner("Analyzing emotion..."):
-                            processed_image, annotated_image = preprocess_image(image)
+                        with st.spinner("Analyzing emotions..."):
+                            annotated_image, emotions_list = detect_emotions_in_frame(image.copy())
                             
-                            if processed_image is not None:
-                                emotion, confidence = predict_emotion(processed_image)
-                                
-                                with col2:
-                                    st.subheader("Result")
-                                    if emotion:
-                                        st.image(cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB), use_container_width=True)
-                                        
-                                        # Display emotion
-                                        st.markdown(f'<div class="emotion-box">{emotion.upper()}</div>', unsafe_allow_html=True)
-                                        
-                                        # Display confidence
-                                        confidence_pct = confidence * 100
+                            with col2:
+                                st.subheader("Result")
+                                if emotions_list:
+                                    st.image(cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB), use_container_width=True)
+                                    
+                                    # Display emotions
+                                    st.markdown(f'<div class="emotion-box">{len(emotions_list)} Face(s) Detected</div>', unsafe_allow_html=True)
+                                    
+                                    for i, result in enumerate(emotions_list, 1):
+                                        confidence_pct = result['confidence'] * 100
                                         st.markdown(f"""
                                         <div class="confidence-bar">
                                             <div class="confidence-fill" style="width: {confidence_pct}%">
-                                                {confidence_pct:.1f}%
+                                                Face {i}: {result['emotion'].upper()} ({confidence_pct:.1f}%)
                                             </div>
                                         </div>
                                         """, unsafe_allow_html=True)
-                                        
-                                        # Show all predictions
-                                        with st.expander("📊 All Predictions"):
-                                            predictions = st.session_state.model.predict(processed_image, verbose=0)[0]
-                                            for i, emo in enumerate(st.session_state.emotions):
-                                                prob = predictions[i] * 100
-                                                st.progress(prob / 100)
-                                                st.write(f"{emo}: {prob:.1f}%")
-                                    else:
-                                        st.error("❌ Could not detect emotion")
-                            else:
-                                st.error("❌ Error processing image")
+                                else:
+                                    st.error("❌ No faces detected")
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
         
@@ -301,16 +309,16 @@ def main():
                                     break
                                 
                                 if frame_count % frame_skip == 0:
-                                    processed_image, annotated_frame = preprocess_image(frame)
-                                    emotion, confidence = predict_emotion(processed_image)
+                                    _, emotions_list = detect_emotions_in_frame(frame.copy())
                                     
-                                    if emotion:
-                                        results.append({
-                                            'frame': frame_count,
-                                            'time': frame_count / fps,
-                                            'emotion': emotion,
-                                            'confidence': confidence
-                                        })
+                                    if emotions_list:
+                                        for emotion_data in emotions_list:
+                                            results.append({
+                                                'frame': frame_count,
+                                                'time': frame_count / fps,
+                                                'emotion': emotion_data['emotion'],
+                                                'confidence': emotion_data['confidence']
+                                            })
                                 
                                 frame_count += 1
                                 progress_bar.progress(min(frame_count / total_frames, 1.0))
@@ -354,43 +362,26 @@ def main():
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
         
-        # Tab 3: Webcam - Take Photo
+        # Tab 3: Live Webcam
         with tab3:
-            st.header("Webcam Emotion Detection")
-            st.info("📸 Take a photo with your webcam to detect emotions instantly")
+            st.header("Live Webcam Emotion Detection")
+            st.info("📹 Real-time emotion detection from your webcam - Multiple faces supported!")
             
-            # Use Streamlit's camera input (works on both local and cloud)
-            camera_photo = st.camera_input("Take a photo")
+            # Configure WebRTC
+            rtc_config = RTCConfiguration(
+                {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+            )
             
-            if camera_photo is not None:
-                try:
-                    # Convert to OpenCV format
-                    image = np.array(Image.open(camera_photo))
-                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                    
-                    # Process and predict
-                    with st.spinner("Analyzing emotion..."):
-                        processed_image, annotated_image = preprocess_image(image)
-                        
-                        if processed_image is not None:
-                            emotion, confidence = predict_emotion(processed_image)
-                            
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.subheader("Captured Photo")
-                                st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), use_container_width=True)
-                            
-                            with col2:
-                                st.subheader("Result")
-                                if emotion:
-                                    st.image(cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB), use_container_width=True)
-                                    st.markdown(f'<div class="emotion-box">{emotion.upper()}</div>', unsafe_allow_html=True)
-                                    st.markdown(f"**Confidence:** {confidence*100:.1f}%")
-                                else:
-                                    st.error("❌ Could not detect emotion")
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+            # Webcam streamer
+            webrtc_streamer(
+                key="emotion-detection",
+                video_processor_factory=EmotionDetector,
+                rtc_configuration=rtc_config,
+                media_stream_constraints={"video": True, "audio": False},
+                async_processing=True
+            )
+            
+            st.success("✅ Webcam is active! Emotions will be detected in real-time for all faces.")
     else:
         st.error("❌ Model not loaded. Please check the error messages above.")
         st.info("💡 Tip: Make sure the model files exist in the models/ directory")
