@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotion Detection - Real-time DNN</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .tabs {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .tab {
+            padding: 15px 30px;
+            background: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            color: #667eea;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .tab:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+        }
+        
+        .tab.active {
+            background: #764ba2;
+            color: white;
+        }
+        
+        .content {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            display: none;
+        }
+        
+        .content.active {
+            display: block;
+        }
+        
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover {
+            background: #f0f4ff;
+            border-color: #764ba2;
+        }
+        
+        .upload-area.dragover {
+            background: #e0e7ff;
+            border-color: #764ba2;
+        }
+        
+        .upload-icon {
+            font-size: 60px;
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+        
+        .upload-text {
+            font-size: 18px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        
+        .upload-hint {
+            font-size: 14px;
+            color: #999;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 10px 5px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+        }
+        
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .result-container {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .result-container.show {
+            display: block;
+        }
+        
+        .result-image {
+            max-width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .emotion-result {
+            text-align: center;
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .emotion-label {
+            font-size: 36px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .confidence-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.5s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .webcam-container {
+            text-align: center;
+        }
+        
+        .webcam-video {
+            max-width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-size: 18px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .video-results {
+            margin-top: 20px;
+        }
+        
+        .video-frame {
+            display: inline-block;
+            margin: 10px;
+            text-align: center;
+        }
+        
+        .video-frame img {
+            max-width: 200px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .video-frame p {
+            margin-top: 5px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 Emotion Detection System</h1>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('image')">📷 Image Upload</button>
+            <button class="tab" onclick="showTab('video')">🎬 Video Upload</button>
+            <button class="tab" onclick="showTab('webcam')">📹 Webcam</button>
+        </div>
+        
+        <!-- Image Upload Tab -->
+        <div id="image-tab" class="content active">
+            <div class="upload-area" onclick="document.getElementById('image-input').click()">
+                <div class="upload-icon">📷</div>
+                <div class="upload-text">Click to upload an image</div>
+                <div class="upload-hint">Supports: JPG, PNG, GIF, BMP</div>
+                <input type="file" id="image-input" accept="image/*" onchange="handleImageUpload(event)">
+            </div>
+            
+            <div id="image-loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Processing image...</p>
+            </div>
+            
+            <div id="image-result" class="result-container">
+                <img id="result-image" class="result-image" alt="Result">
+                <div class="emotion-result">
+                    <div class="emotion-label" id="emotion-label"></div>
+                    <div>Confidence</div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" id="confidence-fill"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Video Upload Tab -->
+        <div id="video-tab" class="content">
+            <div class="upload-area" onclick="document.getElementById('video-input').click()">
+                <div class="upload-icon">🎬</div>
+                <div class="upload-text">Click to upload a video</div>
+                <div class="upload-hint">Supports: MP4, AVI, MOV, MKV (Max 100MB)</div>
+                <input type="file" id="video-input" accept="video/*" onchange="handleVideoUpload(event)">
+            </div>
+            
+            <div id="video-loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Processing video... This may take a moment.</p>
+            </div>
+            
+            <div id="video-result" class="result-container">
+                <div class="stats" id="video-stats"></div>
+                <div class="video-results" id="video-frames"></div>
+            </div>
+        </div>
+        
+        <!-- Webcam Tab -->
+        <div id="webcam-tab" class="content">
+            <div class="webcam-container">
+                <img id="webcam-feed" class="webcam-video" src="/webcam" alt="Webcam Feed">
+                <div style="margin-top: 20px;">
+                    <button class="btn" onclick="startWebcam()">Start Webcam</button>
+                    <button class="btn" onclick="stopWebcam()">Stop Webcam</button>
+                </div>
+                <p style="margin-top: 15px; color: #666;">
+                    Real-time emotion detection from your webcam
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function showTab(tab) {
+            // Hide all tabs
+            document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tab + '-tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        async function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            document.getElementById('image-loading').style.display = 'block';
+            document.getElementById('image-result').classList.remove('show');
+            
+            try {
+                const response = await fetch('/predict_image', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                document.getElementById('image-loading').style.display = 'none';
+                
+                if (data.success) {
+                    document.getElementById('result-image').src = 'data:image/jpeg;base64,' + data.image;
+                    document.getElementById('emotion-label').textContent = data.emotion.toUpperCase();
+                    
+                    const confidence = (data.confidence * 100).toFixed(1);
+                    document.getElementById('confidence-fill').style.width = confidence + '%';
+                    document.getElementById('confidence-fill').textContent = confidence + '%';
+                    
+                    document.getElementById('image-result').classList.add('show');
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                document.getElementById('image-loading').style.display = 'none';
+                alert('Error processing image: ' + error.message);
+            }
+        }
+        
+        async function handleVideoUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            document.getElementById('video-loading').style.display = 'block';
+            document.getElementById('video-result').classList.remove('show');
+            
+            try {
+                const response = await fetch('/predict_video', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                document.getElementById('video-loading').style.display = 'none';
+                
+                if (data.success) {
+                    // Show statistics
+                    const statsHTML = `
+                        <div class="stat-card">
+                            <div class="stat-value">${data.processed_frames}</div>
+                            <div class="stat-label">Frames Processed</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${data.fps}</div>
+                            <div class="stat-label">FPS</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${data.dominant_emotion}</div>
+                            <div class="stat-label">Dominant Emotion</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${data.emotions_detected.length}</div>
+                            <div class="stat-label">Emotions Found</div>
+                        </div>
+                    `;
+                    document.getElementById('video-stats').innerHTML = statsHTML;
+                    
+                    // Show frames
+                    let framesHTML = '<h3 style="margin-top: 20px; color: #667eea;">Sample Frames</h3>';
+                    data.results.forEach(result => {
+                        framesHTML += `
+                            <div class="video-frame">
+                                <img src="data:image/jpeg;base64,${result.image}" alt="Frame">
+                                <p>${result.emotion} (${(result.confidence * 100).toFixed(1)}%)</p>
+                                <p style="font-size: 12px; color: #999;">Time: ${result.time.toFixed(1)}s</p>
+                            </div>
+                        `;
+                    });
+                    document.getElementById('video-frames').innerHTML = framesHTML;
+                    
+                    document.getElementById('video-result').classList.add('show');
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                document.getElementById('video-loading').style.display = 'none';
+                alert('Error processing video: ' + error.message);
+            }
+        }
+        
+        function startWebcam() {
+            const webcamImg = document.getElementById('webcam-feed');
+            webcamImg.src = '/webcam?' + new Date().getTime();
+        }
+        
+        function stopWebcam() {
+            const webcamImg = document.getElementById('webcam-feed');
+            webcamImg.src = '';
+        }
+        
+        // Drag and drop support
+        document.querySelectorAll('.upload-area').forEach(area => {
+            area.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                area.classList.add('dragover');
+            });
+            
+            area.addEventListener('dragleave', () => {
+                area.classList.remove('dragover');
+            });
+            
+            area.addEventListener('drop', (e) => {
+                e.preventDefault();
+                area.classList.remove('dragover');
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    const input = area.querySelector('input[type="file"]');
+                    input.files = files;
+                    
+                    if (input.id === 'image-input') {
+                        handleImageUpload({ target: input });
+                    } else if (input.id === 'video-input') {
+                        handleVideoUpload({ target: input });
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
