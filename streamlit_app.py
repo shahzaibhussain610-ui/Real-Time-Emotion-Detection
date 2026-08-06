@@ -66,6 +66,8 @@ if 'emotions' not in st.session_state:
     st.session_state.emotions = None
 if 'model_loaded' not in st.session_state:
     st.session_state.model_loaded = False
+if 'webcam_running' not in st.session_state:
+    st.session_state.webcam_running = False
 
 @st.cache_resource
 def load_model():
@@ -162,7 +164,7 @@ def main():
         This app uses a Deep Neural Network to detect emotions from:
         - 📷 Images
         - 🎬 Videos  
-        - 📹 Webcam
+        - 📹 Webcam (Live)
         
         **Emotions detected:**
         - Angry
@@ -198,7 +200,7 @@ def main():
         st.success("✅ Model is ready! Upload an image to start.")
         
         # Create tabs
-        tab1, tab2 = st.tabs(["📷 Image Upload", "📹 Webcam"])
+        tab1, tab2, tab3 = st.tabs(["📷 Image Upload", "🎬 Video Upload", "📹 Webcam"])
         
         # Tab 1: Image Upload
         with tab1:
@@ -263,43 +265,160 @@ def main():
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
         
-        # Tab 2: Webcam
+        # Tab 2: Video Upload
         with tab2:
+            st.header("Upload Video for Emotion Analysis")
+            
+            uploaded_video = st.file_uploader(
+                "Choose a video...",
+                type=['mp4', 'avi', 'mov', 'mkv'],
+                help="Upload a video file for emotion analysis"
+            )
+            
+            if uploaded_video is not None:
+                try:
+                    # Save video temporarily
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+                        tmp_file.write(uploaded_video.read())
+                        video_path = tmp_file.name
+                    
+                    # Process video
+                    cap = cv2.VideoCapture(video_path)
+                    
+                    if cap.isOpened():
+                        fps = int(cap.get(cv2.CAP_PROP_FPS))
+                        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                        frame_skip = max(1, fps // 5)
+                        
+                        st.info(f"📹 Video: {fps} FPS, {total_frames} total frames")
+                        
+                        results = []
+                        frame_count = 0
+                        progress_bar = st.progress(0)
+                        
+                        with st.spinner("Processing video..."):
+                            while True:
+                                ret, frame = cap.read()
+                                if not ret:
+                                    break
+                                
+                                if frame_count % frame_skip == 0:
+                                    processed_image, annotated_frame = preprocess_image(frame)
+                                    emotion, confidence = predict_emotion(processed_image)
+                                    
+                                    if emotion:
+                                        results.append({
+                                            'frame': frame_count,
+                                            'time': frame_count / fps,
+                                            'emotion': emotion,
+                                            'confidence': confidence
+                                        })
+                                
+                                frame_count += 1
+                                progress_bar.progress(min(frame_count / total_frames, 1.0))
+                                
+                                if len(results) >= 50:
+                                    break
+                        
+                        cap.release()
+                        os.remove(video_path)
+                        
+                        if results:
+                            # Statistics
+                            st.subheader("📊 Statistics")
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            emotions_detected = [r['emotion'] for r in results]
+                            unique_emotions = list(set(emotions_detected))
+                            dominant_emotion = max(set(emotions_detected), key=emotions_detected.count)
+                            
+                            with col1:
+                                st.metric("Frames Analyzed", len(results))
+                            with col2:
+                                st.metric("FPS", fps)
+                            with col3:
+                                st.metric("Dominant Emotion", dominant_emotion)
+                            with col4:
+                                st.metric("Emotions Found", len(unique_emotions))
+                            
+                            # Sample frames
+                            st.subheader("🎬 Sample Frames")
+                            for i in range(0, min(len(results), 10), 2):
+                                cols = st.columns(2)
+                                for j in range(2):
+                                    if i + j < len(results):
+                                        result = results[i + j]
+                                        with cols[j]:
+                                            st.write(f"**{result['emotion']}** ({result['confidence']*100:.1f}%)")
+                                            st.write(f"Time: {result['time']:.1f}s")
+                        else:
+                            st.warning("No faces detected in video")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+        
+        # Tab 3: Webcam
+        with tab3:
             st.header("Real-time Webcam Emotion Detection")
             st.warning("⚠️ Webcam feature works best when running locally. On Streamlit Cloud, use Image Upload instead.")
             
-            # Webcam input
-            webcam_image = st.camera_input("Take a photo with your webcam")
+            col1, col2 = st.columns([3, 1])
             
-            if webcam_image is not None:
-                try:
-                    # Convert to OpenCV format
-                    image = np.array(Image.open(webcam_image))
-                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            with col1:
+                # Webcam placeholder
+                video_placeholder = st.empty()
+            
+            with col2:
+                st.subheader("Controls")
+                start_button = st.button("▶️ Start Webcam")
+                stop_button = st.button("⏹️ Stop Webcam")
+                
+                if start_button:
+                    st.session_state.webcam_running = True
+                if stop_button:
+                    st.session_state.webcam_running = False
+            
+            # Webcam streaming
+            if st.session_state.get('webcam_running', False):
+                cap = cv2.VideoCapture(0)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                
+                frame_count = 0
+                emotion_history = []
+                
+                while st.session_state.get('webcam_running', False):
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
                     
-                    # Process and predict
-                    with st.spinner("Analyzing emotion..."):
-                        processed_image, annotated_image = preprocess_image(image)
+                    if frame_count % 3 == 0:
+                        processed_image, annotated_frame = preprocess_image(frame)
+                        emotion, confidence = predict_emotion(processed_image)
                         
-                        if processed_image is not None:
-                            emotion, confidence = predict_emotion(processed_image)
+                        if emotion:
+                            emotion_history.append(emotion)
+                            if len(emotion_history) > 10:
+                                emotion_history.pop(0)
                             
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.subheader("Original")
-                                st.image(image, channels="BGR", use_column_width=True)
-                            
-                            with col2:
-                                st.subheader("Result")
-                                if emotion:
-                                    st.image(cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB), use_column_width=True)
-                                    st.markdown(f'<div class="emotion-box">{emotion.upper()}</div>', unsafe_allow_html=True)
-                                    st.markdown(f"**Confidence:** {confidence*100:.1f}%")
-                                else:
-                                    st.error("❌ Could not detect emotion")
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+                            dominant_emotion = max(set(emotion_history), key=emotion_history.count)
+                            cv2.putText(annotated_frame, f"Emotion: {dominant_emotion}", 
+                                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                            cv2.putText(annotated_frame, f"Confidence: {confidence*100:.1f}%", 
+                                       (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    
+                    # Display frame
+                    video_placeholder.image(
+                        cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB),
+                        channels="RGB",
+                        use_column_width=True
+                    )
+                    
+                    frame_count += 1
+                
+                cap.release()
+                st.session_state.webcam_running = False
+            else:
+                st.info("👆 Click 'Start Webcam' to begin real-time emotion detection")
     else:
         st.error("❌ Model not loaded. Please check the error messages above.")
         st.info("💡 Tip: Make sure the model files exist in the models/ directory")
